@@ -1,0 +1,64 @@
+#!/usr/bin/env python
+import rospy
+from av_msgs.msg import Mode
+from av_msgs.msg import States
+from prius_msgs.msg import Control
+from nav_msgs.msg import Odometry
+import numpy as np
+from cv_bridge import CvBridge
+from sensor_msgs.msg import Image
+from cv_bridge import CvBridge, CvBridgeError
+import cv2
+import csv
+from std_msgs.msg import String
+import os
+
+# path, dirs, files = next(os.walk("images"))
+# file_count = len(files)
+# print(file_count)
+
+
+class Collector:
+    def __init__(self):
+        self.sub = rospy.Subscriber("/prius/mode", Mode, self.callback)
+        self.sub2 = rospy.Subscriber('/prius/front_camera/image_raw', Image, self.callback2)
+        self.sub3 = rospy.Subscriber('/prius/states', States, self.callback3)
+        self.last_published_time = rospy.get_rostime()
+        self.last_published = None
+        self.timer = rospy.Timer(rospy.Duration(1. / 20.), self.timer_callback)
+        self.counter = 0
+        self.collect = False
+        self.velocity = 0
+        self.steer = 0
+
+    def timer_callback(self, event):
+        if self.last_published and self.last_published_time < rospy.get_rostime() + rospy.Duration(1.0 / 20.):
+            self.pub(self.last_published)
+
+    def callback(self, message):
+        self.collect = message.collect
+
+    def callback2(self, message):
+        if self.collect:
+            bridge = CvBridge()
+            cv_image = bridge.imgmsg_to_cv2(message, "bgr8")
+            try:
+                cv2.imwrite('/av_ws/src/av_04/images/{}.png'.format(self.counter), cv_image)
+
+                with open('/av_ws/src/av_04/etykiety.csv', 'a') as fd:
+                    string = str('{}.png '.format(self.counter) + str(self.velocity)+' '+str(self.steer)+'\n')
+                    fd.write(string)
+
+                self.counter += 1
+            except CvBridgeError as e:
+                print(e)
+
+    def callback3(self, message):
+        self.velocity = message.velocity
+        self.steer = message.steer
+
+
+if __name__ == "__main__":
+    rospy.init_node('collector_node')
+    v = Collector()
+    rospy.spin()

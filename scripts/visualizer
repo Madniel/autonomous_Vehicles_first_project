@@ -1,0 +1,88 @@
+#!/usr/bin/env python
+import rospy
+from av_msgs.msg import Mode
+from av_msgs.msg import States
+from prius_msgs.msg import Control
+from nav_msgs.msg import Odometry
+import numpy as np
+from cv_bridge import CvBridge
+from sensor_msgs.msg import Image
+from cv_bridge import CvBridge, CvBridgeError
+import cv2
+
+class Visualizer:
+    def __init__(self):
+        self.sub = rospy.Subscriber("/prius/front_camera/image_raw", Image, self.callback)
+        self.sub_vel = rospy.Subscriber("/prius/states", States, self.vel_sub)
+        self.sub_s_c = rospy.Subscriber("/prius/mode", Mode, self.self_collect)
+        self.sub_t_b = rospy.Subscriber("/prius", Control, self.self_tb)
+
+        self.pub = rospy.Publisher('/prius/visualization', Image, queue_size=1)
+
+        self.last_published_time = rospy.get_rostime()
+        self.last_published = None
+        self.timer = rospy.Timer(rospy.Duration(1. / 20.), self.timer_callback)
+
+        self.collect = False
+        self.selfdrive = False
+        self.velocity = 0
+        self.throttle = 0
+        self.brake = 0
+        self.steer = 0
+
+    def timer_callback(self, event):
+        if self.last_published and self.last_published_time < rospy.get_rostime() + rospy.Duration(1.0 / 20.):
+            self.pub(self.last_published)
+
+    # states velocity, steer
+    #
+    def vel_sub(self, message):
+        self.velocity = message.velocity
+        self.steer = message.steer
+
+    def self_collect(self, message):
+        self.collect = message.collect
+        self.selfdrive = message.selfdriving
+
+    def self_tb(self, message):
+        self.throttle = message.throttle
+        self.brake = message.brake
+
+    def callback(self, message):
+
+        bridge = CvBridge()
+        cv_image = bridge.imgmsg_to_cv2(message, desired_encoding='passthrough')
+        # font
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        # org
+        org_collect = (20, 750)
+        org_selfdrive = (20, 725)
+        org_velocity = (20, 700)
+        org_throttle = (520, 700)
+        org_steer = (520, 750)
+        org_brake = (520, 725)
+
+        # fontScale
+        fontScale = 0.8
+        # Blue color in BGR
+        color = (255, 255, 255)
+        # Line thickness of 2 px
+        thickness = 1
+        cv2.putText(cv_image, str('collect:' + str(self.collect)), org_collect, font, fontScale, color, thickness, cv2.LINE_AA)
+        cv2.putText(cv_image, str('selfdrive:' + str(self.selfdrive)), org_selfdrive, font, fontScale, color, thickness, cv2.LINE_AA)
+        cv2.putText(cv_image, str('velocity:' + str(self.velocity) + str('km/h')), org_velocity, font, fontScale, color,thickness, cv2.LINE_AA)
+        cv2.putText(cv_image, str('throttle:' + str(self.throttle)), org_throttle, font, fontScale, color, thickness,cv2.LINE_AA)
+        cv2.putText(cv_image, str('brake:' + str(self.brake)), org_brake, font, fontScale, color, thickness, cv2.LINE_AA)
+        cv2.putText(cv_image, str('steer:' + str(self.steer)), org_steer, font, fontScale, color, thickness, cv2.LINE_AA)
+
+        try:
+            self.pub.publish(bridge.cv2_to_imgmsg(cv_image, "bgr8"))
+        except CvBridgeError as e:
+            print(e)
+
+
+if __name__ == "__main__":
+    rospy.init_node('visualizer_node')
+    v = Visualizer()
+    rospy.spin()
+

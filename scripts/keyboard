@@ -1,0 +1,93 @@
+#!/usr/bin/env python
+import rospy
+import keyboard
+from av_msgs.msg import Mode
+from prius_msgs.msg import Control
+
+
+class Keyboard:
+    def __init__(self):
+        self.control_pub = rospy.Publisher("/prius", Control, queue_size=1)
+        self.mode_pub = rospy.Publisher("/prius/mode", Mode, queue_size=1)
+        keyboard.on_press_key("p", self.key_collect, suppress=False)
+        keyboard.on_press_key("o", self.key_selfdriving, suppress=False)
+        keyboard.on_press_key("w", self.key_up, suppress=False)
+        keyboard.on_press_key("a", self.key_left, suppress=False)
+        keyboard.on_press_key("s", self.key_down, suppress=False)
+        keyboard.on_press_key("d", self.key_right, suppress=False)
+        keyboard.on_press_key("0", self.key_no_command, suppress=False)
+        keyboard.on_press_key("1", self.key_neutral, suppress=False)
+        keyboard.on_press_key("2", self.key_forward, suppress=False)
+        keyboard.on_press_key("3", self.key_reverse, suppress=False)
+
+        self.collect_state = False
+        self.selfdriving_state = False
+
+        self.steer = 0.0
+        self.brake = 0.0
+        self.throttle = 0.0
+        self.gear = Control.NO_COMMAND
+
+    def key_collect(self, e):
+        print('collect')
+        self.collect_state ^= True
+
+    def key_selfdriving(self, e):
+        print('self driving')
+        self.selfdriving_state ^= True
+
+    def key_no_command(self, event=None):
+        self.gear = Control.NO_COMMAND
+
+    def key_neutral(self, event=None):
+        self.gear = Control.NEUTRAL
+
+    def key_forward(self, event=None):
+        self.gear = Control.FORWARD
+
+    def key_reverse(self, event=None):
+        self.gear = Control.REVERSE
+
+    def key_up(self, event=None):
+        if self.throttle < 1.0:
+            self.throttle += 0.2
+        self.brake = 0.0
+
+    def key_right(self, event=None):
+        if self.steer > - 1.0:
+            self.steer -= 0.2
+
+    def key_left(self, event=None):
+        if self.steer < 1.0:
+            self.steer += 0.2
+
+    def key_down(self, event=None):
+        if self.brake < 1.0:
+            self.brake += 0.2
+        self.throttle = 0.0
+
+    def publish_control(self, event=None):
+        stamp = rospy.Time.now()
+        # CONTROL
+        control_msg = Control()
+        control_msg.header.stamp = stamp
+        control_msg.steer = self.steer
+        control_msg.throttle = self.throttle
+        control_msg.brake = self.brake
+        control_msg.shift_gears = self.gear
+
+        # MODE
+        mode_msg = Mode()
+        mode_msg.header.stamp = stamp
+        mode_msg.collect = self.collect_state
+        mode_msg.selfdriving = self.selfdriving_state
+
+        self.control_pub.publish(control_msg)
+        self.mode_pub.publish(mode_msg)
+
+
+if __name__ == "__main__":
+    rospy.init_node("controller_node")
+    k = Keyboard()
+    rospy.Timer(rospy.Duration(1.0 / 30.0), k.publish_control)
+    rospy.spin()

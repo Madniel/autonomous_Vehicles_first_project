@@ -1,0 +1,90 @@
+#!/usr/bin/env python
+import rospy
+from av_msgs.msg import Mode
+from av_msgs.msg import States
+from prius_msgs.msg import Control
+from nav_msgs.msg import Odometry
+import numpy as np
+from cv_bridge import CvBridge
+from sensor_msgs.msg import Image
+from cv_bridge import CvBridge, CvBridgeError
+import cv2
+import csv
+from std_msgs.msg import String
+import tensorflow as tf
+from simple_pid import PID
+
+
+class Control_prediction:
+    def __init__(self):
+        self.sub = rospy.Subscriber("/prius/mode", Mode, self.callback)
+        self.sub2 = rospy.Subscriber('/prius/front_camera/image_raw', Image, self.callback2)
+        self.pub2 = rospy.Publisher('/prius', Control, queue_size=1)
+        self.sub3 = rospy.Subscriber('/prius/states', States, self.callback3)
+        self.last_published_time = rospy.get_rostime()
+        self.last_published = None
+        self.timer = rospy.Timer(rospy.Duration(1. / 20.), self.timer_callback)
+        self.selfdriving_state = False
+        self.v = 0
+        self.still_throttle = 0
+        self.still_steer = 0
+        self.still_brake = 0
+
+    def timer_callback(self, event):
+        if self.last_published and self.last_published_time < rospy.get_rostime() + rospy.Duration(1.0 / 20.):
+            self.pub(self.last_published)
+
+    def callback(self, message):
+        self.selfdriving_state = message.selfdriving
+
+    def callback3(self, message):
+        self.v = message.velocity
+        if self.selfdriving_state:
+            control_msg = Control()
+            control_msg.steer = self.still_steer
+            control_msg.throttle = self.still_throttle
+            control_msg.brake = self.still_brake
+            self.pub2.publish(control_msg)
+
+    def callback2(self, message):
+        if self.selfdriving_state:
+            bridge = CvBridge()
+            cv_image = bridge.imgmsg_to_cv2(message, "bgr8")
+            # cv_image = cv_image[380:550, :]
+            cv_image = cv2.resize(cv_image, (100, 100))
+            cv_image = cv_image[np.newaxis, ...]
+
+            try:
+                model = tf.keras.models.load_model('/av_ws/src/av_04/cnn_models/modelo.h5')
+                print(model.summary())
+                pred = model.predict(cv_image)
+                print(pred)
+                # STEER
+                # control_msg = Control()
+                steer = pred[0][1]
+
+                self.still_steer = steer
+                # PID
+
+                pid = PID(-0.1, 0, 0)
+                pid.sample_time = 1  # Update every 0.01 seconds
+                pid.output_limits = (-1, 1)
+                # Assume we have a system we want to control in controlled_system
+                v_pred = pred[0][0]
+                v = self.v
+                output = pid(v_pred - v)
+
+                if output > 0:
+                    self.still_throttle = output
+                else:
+                    self.still_brake = 1
+                    self.still_throttle = 0
+
+            except CvBridgeError as e:
+                print(e)
+
+
+if __name__ == "__main__":
+    rospy.init_node('control_prediction_node')
+    v = Control_prediction()
+    rospy.spin()
