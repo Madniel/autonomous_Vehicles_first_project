@@ -21,3 +21,9 @@ and brake values,
 
 ## Neural Network Model:
 A convolutional neural network was used, with the architecture shown below:
+![obraz_2022-03-15_140651](https://user-images.githubusercontent.com/48990829/158384949-fceb8746-7a88-457d-a650-c18074b0e46d.png)
+
+Block diagram:
+![Przechwytywanie1](https://user-images.githubusercontent.com/48990829/158385237-64de6524-f430-4132-959e-e1359f643a8c.PNG)
+
+
